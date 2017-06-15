@@ -1,0 +1,8 @@
+{
+  "description": "use queryList",
+  "require": {
+    "php": ">=5",
+    "jaeger/querylist": "^3.2",
+    "jaeger/querylist-ext-multi": "^1.0"
+  }
+}
