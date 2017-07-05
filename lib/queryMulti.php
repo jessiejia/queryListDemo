@@ -134,13 +134,4 @@ abstract class QueryListMulti
         QueryList::$logger->$level($message);
     }
 
-    /**
-     * 做成内置的才好啊~~
-     */
-    public function exception()
-    {
-        $this->log(func_get_args());
-        exit();
-    }
-
 }
