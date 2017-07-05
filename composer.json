@@ -3,6 +3,7 @@
   "require": {
     "php": ">=5",
     "jaeger/querylist": "^3.2",
-    "jaeger/querylist-ext-multi": "^1.0"
+    "jaeger/querylist-ext-multi": "^1.0",
+    "monolog/monolog": "^1.23"
   }
 }

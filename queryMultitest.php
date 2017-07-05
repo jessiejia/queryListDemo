@@ -4,49 +4,60 @@ require_once __DIR__ . '/vendor/autoload.php';
 use QL\QueryList;
 
 
-
-class QueryListMultiTest
+abstract class QueryListMulti
 {
 
     public $startUrl = '';
     private $_baseUrl = '';
-    public $nextPages = [];
-    public $finishPages = [];
-    private $todoUrls = [];
+    public $todoUrls = [];
+    public $finishUrls = [];
+    private $doingUrls = [];
 
-    public function __construct($startUrl)
+    private function _prepareStartUrl($startUrl)
     {
         $this->startUrl = $startUrl;
 
         if (($t = parse_url($startUrl)) && !empty($t['host'])) {
             $this->_baseUrl = $t['host'];
         } else {
-            $this->exception('请检查初始url');
+            throw new Exception('请设置初始url');
         }
-        $this->nextPages = [md5($startUrl) => $startUrl];
+        $this->todoUrls = [md5($startUrl) => $startUrl];
     }
 
     /**
      * 从列表某页开始爬
      */
 
-    public function start()
+    public function start($startUrl = '')
     {
-        $this->log('==start==');
-        while (!empty($this->nextPages)) {
-            $this->log("\n\n\n\n\n<<<<<<<<while<<<<<<<<", $this->nextPages);
+        $this->_prepareStartUrl($startUrl);
+        QueryList::setLog('./ql.'.date('Ymd').'.log');
+        self::log('==========start=========');
+        do {
+            $this->doingUrls = $this->todoUrls;
+            $this->todoUrls = [];
+            $this->_crwal($this->doingUrls, array(&$this, 'success'), array(&$this, 'error'));
+            $this->finishUrls += $this->doingUrls;
+        } while (!empty($this->todoUrls));
 
-            $this->todoUrls = $this->nextPages;
-            $this->nextPages = [];
-            $this->_crwal($this->todoUrls, array(&$this, "successPage"));
-            $this->finishPages = array_merge($this->finishPages, $this->todoUrls);
-        }
-
-        $this->log('==finishPages==', $this->finishPages);
+        self::log('=======finish========');
 
     }
 
-    private function _crwal($urls, $success, $error=null)
+    /**
+     * @param $html
+     * @return array urls
+     */
+    abstract public function success($html);
+
+    /**
+     * 读取urls,交给success和error解析
+     * @array $urls
+     * @function $success
+     * @function null $error
+     */
+    private function _crwal($urls, $successFun)
     {
         $cm = QueryList::run('Multi', [//待采集链接集合
             'list' => array_values($urls),
@@ -62,89 +73,74 @@ class QueryListMultiTest
                 'maxTry' => 3],
             //不自动开始线程，默认自动开始
             'start' => false,
-            'success' => function ($html) use ($success) {
-//                $this->log(,array_slice($html['info'],0,3));
-                call_user_func($success, $html['content']);
+            'success' => function ($html) use ($successFun) {
+                self::log($html['info']['url']);
+                $this->addNextPages(call_user_func($successFun, $html['content']));
             },
             'error' => function ($msg) {
-                var_dump($msg);
-                exit();
+                throw new Exception($msg);
             }]);
         $cm->start();
     }
 
     /**
-     * 获取urls下标追加到待采集列表
+     * 将newurls追加到todoUrls
+     * @array $newurls
+     * @return
      */
-    private function _getNextPages($ql)
+    private function addNextPages($newurls)
     {
-        $rules = [
-            'url' => ['', 'href'],
-        ];
-        $range = '#wrapper .page_nav .pagenew li a';
-        $urls = $ql->setQuery($rules, $range)
-            ->getData(function ($item) {
-                return $item['url'];
-            });
-        $this->addNextPages($urls);
-    }
-
-    public function addNextPages($newurls)
-    {
-        if (($newurls = array_filter($newurls)) && $newurls) {
+        if (is_array($newurls) && ($newurls = array_filter($newurls)) && $newurls) {
             if (($t = parse_url(current($newurls))) && empty($t['host'])) {
                 $newurls = array_map(function ($u) {
                     return $this->_baseUrl . $u;
                 }, $newurls);
             }
             array_map(function ($u) {
-                if (!isset($this->todoUrls[md5($u)]) && !isset($this->nextPages[md5($u)]) && !isset($this->finishPages[md5($u)])) {
-                    $this->log('>>>>>>>>addNextPages>>>>>>>>>', [md5($u) => $u]);
-                    $this->nextPages = array_merge($this->nextPages, [md5($u) => $u]);
+                $k = md5($u);
+                if (!isset($this->doingUrls[$k]) && !isset($this->finishUrls[$k])) {
+                    $this->todoUrls += [$k=> $u];
                 }
-                return $u;
             }, $newurls);
         }
-        return True;
     }
 
 
-    public function successPage($html)
+    /**
+     * 二维数组输出到CSV文件
+     * @array $data
+     * @param string $file
+     */
+    private $_datetime = '';
+    protected function printCSV($data, $file = '')
     {
-        $rules = array(
-            'title' => array('.block .h2>a', 'text'),
-            'desc' => array('.block .memo p', 'text')
-        );
-        $range = '.cate_list>ul li';
-        $ql = QueryList::Query($html, $rules, $range);
-        $data = $ql->getData(function ($item) {
-            return $item;
-        });
-        //saveDB....
-
-
-        $this->_getNextPages($ql);
-    }
-
-
-    public function log()
-    {
-        $msgs = func_get_args();
-        foreach ($msgs as $msg) {
-            if (is_string($msg)) echo $msg . "\n";
-            else var_dump($msg);
+        if(is_array($data)) {
+            $file = ($file ?: 'printdata') . ($this->_datetime = $this->_datetime ?: date('YmdHis')) . '.csv';
+            $myfile = fopen($file, "a+") or die("Unable to open file!");
+            foreach ($data as $line) {
+                $txt = join(',', $line) . "\n";
+                echo $txt;
+                fwrite($myfile, $txt);
+            }
+            fclose($myfile);
         }
     }
+    /**
+     * 貌似有内置的log
+     * 自己如何写不同的log等级
+     */
+    public static function log($message, $level='info')
+    {
+        QueryList::$logger->$level($message);
+    }
 
+    /**
+     * 做成内置的才好啊~~
+     */
     public function exception()
     {
         $this->log(func_get_args());
         exit();
     }
+
 }
-
-
-(new QueryListMultiTest('http://cms.querylist.cc/plus/list.php?tid=15'))->start();
-/**
- * 如何模拟登陆
- */
